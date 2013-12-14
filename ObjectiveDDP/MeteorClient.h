@@ -12,6 +12,7 @@
 @property (strong, nonatomic) NSMutableDictionary *collections;
 @property (copy, nonatomic) NSString *sessionToken;
 @property (copy, nonatomic) NSString *userId;
+@property (copy, nonatomic) NSMutableDictionary *user;
 @property (assign, nonatomic) BOOL websocketReady;
 @property (assign, nonatomic) BOOL connected;
 @property (nonatomic, assign) int retryAttempts;
@@ -23,14 +24,15 @@
 - (void)removeSubscription:(NSString *)subscriptionName;
 - (void)resetCollections;
 - (void)logonWithUsername:(NSString *)username password:(NSString *)password;
+- (void)logonWithToken:(NSString *)sessionToken;
 - (void)logout;
 
 @end
 
 @protocol DDPAuthDelegate <NSObject>
 
+- (void)websocketDidOpen;
 - (void)authenticationWasSuccessful;
 - (void)authenticationFailed:(NSString *)reason;
 
 @end
-

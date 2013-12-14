@@ -45,7 +45,7 @@
     [self.ddp methodWithId:methodId
                     method:methodName
                 parameters:parameters];
-
+    
     return methodId;
 }
 
@@ -89,6 +89,14 @@ static BOOL userIsLoggingIn = NO;
     [self sendWithMethodName:@"beginPasswordExchange" parameters:params];
 }
 
+- (void) logonWithToken:(NSString *)sessionToken {
+    if (userIsLoggingIn) {
+        return;
+    }
+    NSArray *params = @[@{@"resume":sessionToken}];
+    [self sendWithMethodName:@"login" parameters:params];
+}
+
 - (void)logout {
     [self sendWithMethodName:@"logout" parameters:nil];
 }
@@ -101,8 +109,23 @@ static int LOGON_RETRY_MAX = 5;
     NSString *msg = [message objectForKey:@"msg"];
     NSString *messageId = message[@"id"];
     
+    NSLog(@"DDP Message: %@", message);
+    
     if ([self.methodIds containsObject:messageId]) {
-        if(msg && [msg isEqualToString:@"result"]) {
+        if (msg && [msg isEqualToString:@"result"]
+            && message[@"result"]
+            && [message[@"result"] isKindOfClass:[NSDictionary class]]
+            && message[@"result"][@"id"]
+            && message[@"result"][@"token"]) {
+            NSLog(@"hit the token callback");
+            userIsLoggingIn = NO;
+            self.sessionToken = message[@"result"][@"token"];
+            self.userId = message[@"result"][@"id"];
+            [self sendWithMethodName:@"login" parameters:@[@{@"resume": self.sessionToken}]];
+            [self.authDelegate authenticationWasSuccessful];
+            
+            
+        } else if(msg && [msg isEqualToString:@"result"]) {
             NSDictionary *response = message[@"result"];
             NSString *notificationName = [NSString stringWithFormat:@"response_%@", messageId];
             [[NSNotificationCenter defaultCenter] postNotificationName:notificationName
@@ -112,7 +135,7 @@ static int LOGON_RETRY_MAX = 5;
         }
     } else if (msg && [msg isEqualToString:@"result"]
                && message[@"result"]
-               && [message[@"result"] isKindOfClass:[NSDictionary class]]               
+               && [message[@"result"] isKindOfClass:[NSDictionary class]]
                && message[@"result"][@"B"]
                && message[@"result"][@"identity"]
                && message[@"result"][@"salt"]) {
@@ -181,6 +204,22 @@ static int LOGON_RETRY_MAX = 5;
     [self resetCollections];
     // TODO: pre1 should be a setting
     [self.ddp connectWithSession:nil version:@"pre1" support:nil];
+    
+//    NSUserDefaults *prefs = [NSUserDefaults standardUserDefaults];
+//    NSString *sessionToken = [prefs stringForKey:@"sessionToken"];
+//    NSLog(@"Session Token %@", sessionToken);
+//    
+//    if (sessionToken) {
+//        
+//        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+//            [self sendWithMethodName:@"login" parameters:@[@{@"resume": sessionToken}]];
+//        });
+//        
+//        
+//        NSLog(@"Redirect to home page here");
+//    }
+
+    
 }
 
 - (void)reconnect {
@@ -211,7 +250,7 @@ static int LOGON_RETRY_MAX = 5;
 - (void)makeMeteorDataSubscriptions {
     for (NSString *key in [self.subscriptions allKeys]) {
         NSString *uid = [BSONIdGenerator generate];
-        [self.subscriptions setObject:uid forKey:key];  
+        [self.subscriptions setObject:uid forKey:key];
         NSArray *params = self.subscriptionsParameters[key];
         [self.ddp subscribeWith:uid name:key parameters:params];
     }
@@ -230,35 +269,35 @@ static int LOGON_RETRY_MAX = 5;
 
 - (NSDictionary *)_parseObjectAndAddToCollection:(NSDictionary *)message {
     NSMutableDictionary *object = [NSMutableDictionary dictionaryWithDictionary:@{@"_id": message[@"id"]}];
-
+    
     for (id key in message[@"fields"]) {
         object[key] = message[@"fields"][key];
     }
-
+    
     if (!self.collections[message[@"collection"]]) {
         self.collections[message[@"collection"]] = [NSMutableArray array];
     }
-
+    
     NSMutableArray *collection = self.collections[message[@"collection"]];
-
+    
     [collection addObject:object];
-
+    
     return object;
 }
 
 - (void)_parseRemoved:(NSDictionary *)message {
     NSString *removedId = [message objectForKey:@"id"];
     int indexOfRemovedObject = 0;
-
+    
     NSMutableArray *collection = self.collections[message[@"collection"]];
-
+    
     for (NSDictionary *object in collection) {
         if ([object[@"_id"] isEqualToString:removedId]) {
             break;
         }
         indexOfRemovedObject++;
     }
-
+    
     [collection removeObjectAtIndex:indexOfRemovedObject];
 }
 
@@ -297,6 +336,14 @@ static SRPUser *srpUser;
     if (srp_user_is_authenticated) {
         self.sessionToken = response[@"token"];
         self.userId = response[@"id"];
+        NSArray *users = [NSArray arrayWithArray:self.collections[@"users"]];
+        
+        for (NSMutableDictionary *user in users) {
+            if ([user[@"_id"] isEqualToString:self.userId]) {
+                self.user = user;
+            }
+        }
+        
         [self.authDelegate authenticationWasSuccessful];
         srp_user_delete(srpUser);
     }
